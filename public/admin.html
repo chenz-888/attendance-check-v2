@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>签到记录后台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell wide">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark">管</div>
+          <div>
+            <h1>签到记录后台</h1>
+            <p>查看所有签到和签退记录</p>
+          </div>
+        </div>
+        <a class="admin-link" href="/">返回签到</a>
+      </header>
+
+      <section class="panel">
+        <form id="adminForm" class="admin-form">
+          <label>
+            管理员密码
+            <input id="password" type="password" placeholder="请输入管理员密码" required />
+          </label>
+          <button class="btn primary" type="submit">查看记录</button>
+          <button class="btn secondary" id="exportCsv" type="button">导出 CSV</button>
+        </form>
+        <p class="message" id="message"></p>
+      </section>
+
+      <section class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>类型</th>
+                <th>姓名</th>
+                <th>学院</th>
+                <th>学号/工号</th>
+                <th>时间</th>
+                <th>定位</th>
+                <th>精度</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody id="recordBody"></tbody>
+          </table>
+          <div class="empty" id="empty">暂无记录</div>
+        </div>
+      </section>
+    </main>
+    <script src="/admin.js"></script>
+  </body>
+</html>

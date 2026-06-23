@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>人员签到签退</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="mark">✓</div>
+          <div>
+            <h1>人员签到签退</h1>
+            <p>登记身份后，使用当前位置完成签到和签退</p>
+          </div>
+        </div>
+        <a class="admin-link" href="/admin.html">管理员</a>
+      </header>
+
+      <section class="panel">
+        <h2>首次登录</h2>
+        <form id="profileForm">
+          <label>
+            本人姓名
+            <input id="name" autocomplete="name" placeholder="请输入真实姓名" required />
+          </label>
+          <label>
+            学院
+            <input id="college" autocomplete="organization" placeholder="请输入所在学院" required />
+          </label>
+          <label>
+            学号 / 工号
+            <input id="personId" autocomplete="off" placeholder="请输入学号或工号" required />
+          </label>
+          <div class="buttons">
+            <button class="btn primary" type="submit">保存身份</button>
+            <button class="btn secondary" id="resetProfile" type="button">重新登记</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="clock" id="clock">--:--:--</div>
+        <div class="date" id="dateLine">正在读取时间</div>
+        <div class="stats">
+          <div><span>当前姓名</span><strong id="currentName">未登记</strong></div>
+          <div><span>学院</span><strong id="currentCollege">未登记</strong></div>
+          <div><span>学号 / 工号</span><strong id="currentId">未登记</strong></div>
+        </div>
+        <div class="actions">
+          <button class="btn punch primary" id="checkIn" type="button">签到</button>
+          <button class="btn punch gold" id="checkOut" type="button">签退</button>
+        </div>
+        <p class="message" id="message"></p>
+        <p class="hint">手机会询问定位权限，请选择允许。提交后记录会保存到后台，管理员可统一查看。</p>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
