@@ -45,18 +45,24 @@ async function loadRecords() {
     return;
   }
 
-  const response = await fetch("/api/records", {
-    headers: { "x-admin-password": password }
-  });
-  const result = await response.json();
-  if (!result.ok) {
-    setMessage(result.error || "读取失败", true);
+  let result;
+  try {
+    const response = await fetch("/api/records", {
+      headers: { "x-admin-password": password }
+    });
+    result = await response.json();
+    if (!result.ok) {
+      setMessage(result.error || "读取失败", true);
+      return;
+    }
+  } catch {
+    setMessage("后台连接失败，请稍后重试。", true);
     return;
   }
 
   sessionStorage.setItem("attendance-admin-password", password);
   renderRecords(result.records);
-  setMessage(`共 ${result.records.length} 条记录。`);
+  setMessage(`共 ${result.records.length} 条记录。后台会每 10 秒自动刷新。`);
 }
 
 function renderRecords(records) {
@@ -109,3 +115,9 @@ if (savedPassword) {
   els.password.value = savedPassword;
   loadRecords();
 }
+
+setInterval(() => {
+  if (getPassword()) {
+    loadRecords();
+  }
+}, 10000);

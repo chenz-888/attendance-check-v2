@@ -35,6 +35,25 @@ function setBusy(isBusy) {
   els.checkOut.disabled = isBusy || !loadProfile();
 }
 
+async function checkStorageStatus() {
+  try {
+    const response = await fetch("/api/storage-status");
+    const result = await response.json();
+    if (!result.ok) {
+      els.checkIn.disabled = true;
+      els.checkOut.disabled = true;
+      setMessage(result.message || "数据库未连接，暂时不能签到。", true);
+      return false;
+    }
+    return true;
+  } catch {
+    els.checkIn.disabled = true;
+    els.checkOut.disabled = true;
+    setMessage("无法确认数据库状态，暂时不能签到。", true);
+    return false;
+  }
+}
+
 function updateProfileView() {
   const profile = loadProfile();
   els.name.value = profile?.name || "";
@@ -72,9 +91,12 @@ function getLocation() {
 }
 
 async function punch(type) {
+  const storageOk = await checkStorageStatus();
+  if (!storageOk) return;
+
   const profile = loadProfile();
-  if (!profile?.name || !profile?.personId) {
-    setMessage("请先保存姓名和学号/工号。", true);
+  if (!profile?.name || !profile?.college || !profile?.personId) {
+    setMessage("请先保存姓名、学院和学号/工号。", true);
     return;
   }
 
@@ -138,3 +160,4 @@ els.checkOut.addEventListener("click", () => punch("签退"));
 updateClock();
 setInterval(updateClock, 1000);
 updateProfileView();
+checkStorageStatus();
