@@ -5,9 +5,19 @@ const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-me";
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const RECORDS_FILE = path.join(DATA_DIR, "records.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
+let pool = null;
+
+if (DATABASE_URL) {
+  const { Pool } = require("pg");
+  pool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DATABASE_URL.includes("localhost") ? false : { rejectUnauthorized: false }
+  });
+}
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -20,6 +30,65 @@ const mimeTypes = {
 };
 
 let writeQueue = Promise.resolve();
+let databaseReady = false;
+
+function requireDatabase() {
+  if (!pool) {
+    throw new Error("数据库未配置，已拒绝保存。请先在 Render 设置 DATABASE_URL。");
+  }
+}
+
+async function initDatabase() {
+  if (!pool) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_records (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      college TEXT NOT NULL,
+      person_id TEXT NOT NULL,
+      time TIMESTAMPTZ NOT NULL,
+      day TEXT NOT NULL,
+      latitude DOUBLE PRECISION NOT NULL,
+      longitude DOUBLE PRECISION NOT NULL,
+      accuracy INTEGER NOT NULL,
+      ip TEXT,
+      user_agent TEXT
+    )
+  `);
+  databaseReady = true;
+}
+
+async function getDatabaseStatus() {
+  if (!pool) {
+    return {
+      ok: false,
+      databaseConfigured: false,
+      databaseReady: false,
+      message: "数据库未配置，系统已禁止签到，避免记录丢失。"
+    };
+  }
+
+  try {
+    await initDatabase();
+    await pool.query("SELECT 1");
+    databaseReady = true;
+    return {
+      ok: true,
+      databaseConfigured: true,
+      databaseReady: true,
+      message: "数据库已连接，签到记录会长期保存。"
+    };
+  } catch (error) {
+    databaseReady = false;
+    return {
+      ok: false,
+      databaseConfigured: true,
+      databaseReady: false,
+      message: error.message || "数据库连接失败。"
+    };
+  }
+}
 
 function ensureStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -42,6 +111,59 @@ function readRecords() {
 function saveRecords(records) {
   ensureStore();
   fs.writeFileSync(RECORDS_FILE, `${JSON.stringify(records, null, 2)}\n`);
+}
+
+async function listRecords() {
+  requireDatabase();
+
+  await initDatabase();
+  const result = await pool.query(`
+    SELECT
+      id,
+      type,
+      name,
+      college,
+      person_id AS "personId",
+      time,
+      day,
+      latitude,
+      longitude,
+      accuracy,
+      ip,
+      user_agent AS "userAgent"
+    FROM attendance_records
+    ORDER BY time DESC
+  `);
+  return result.rows.map(record => ({
+    ...record,
+    time: new Date(record.time).toISOString()
+  }));
+}
+
+async function addRecord(record) {
+  requireDatabase();
+
+  await initDatabase();
+  await pool.query(
+    `INSERT INTO attendance_records (
+      id, type, name, college, person_id, time, day,
+      latitude, longitude, accuracy, ip, user_agent
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    [
+      record.id,
+      record.type,
+      record.name,
+      record.college,
+      record.personId,
+      record.time,
+      record.day,
+      record.latitude,
+      record.longitude,
+      record.accuracy,
+      record.ip,
+      record.userAgent
+    ]
+  );
 }
 
 function sendJson(res, status, data) {
@@ -117,7 +239,18 @@ function validatePunch(payload) {
 
 async function handleApi(req, res) {
   if (req.method === "GET" && req.url === "/api/health") {
-    sendJson(res, 200, { ok: true });
+    const storage = await getDatabaseStatus();
+    sendJson(res, 200, {
+      ok: true,
+      databaseConfigured: storage.databaseConfigured,
+      databaseReady: storage.databaseReady
+    });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/api/storage-status") {
+    const storage = await getDatabaseStatus();
+    sendJson(res, storage.ok ? 200 : 503, storage);
     return;
   }
 
@@ -137,12 +270,7 @@ async function handleApi(req, res) {
         userAgent: req.headers["user-agent"] || ""
       };
 
-      writeQueue = writeQueue.then(() => {
-        const records = readRecords();
-        records.push(record);
-        saveRecords(records);
-      });
-      await writeQueue;
+      await addRecord(record);
       sendJson(res, 200, { ok: true, record });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error.message || "保存失败" });
@@ -155,8 +283,12 @@ async function handleApi(req, res) {
       sendJson(res, 401, { ok: false, error: "管理员密码不正确" });
       return;
     }
-    const records = readRecords().sort((a, b) => new Date(b.time) - new Date(a.time));
-    sendJson(res, 200, { ok: true, records });
+    try {
+      const records = await listRecords();
+      sendJson(res, 200, { ok: true, records });
+    } catch (error) {
+      sendJson(res, 503, { ok: false, error: error.message || "数据库读取失败" });
+    }
     return;
   }
 
@@ -165,18 +297,24 @@ async function handleApi(req, res) {
       sendText(res, 401, "管理员密码不正确");
       return;
     }
+    let rows;
+    try {
+      rows = (await listRecords()).map(record => [
+        record.type,
+        record.name,
+        record.college,
+        record.personId,
+        record.time,
+        record.latitude,
+        record.longitude,
+        record.accuracy,
+        record.ip
+      ]);
+    } catch (error) {
+      sendText(res, 503, error.message || "数据库读取失败");
+      return;
+    }
     const header = ["类型", "姓名", "学院", "学号/工号", "时间", "纬度", "经度", "精度(米)", "IP"];
-    const rows = readRecords().map(record => [
-      record.type,
-      record.name,
-      record.college,
-      record.personId,
-      record.time,
-      record.latitude,
-      record.longitude,
-      record.accuracy,
-      record.ip
-    ]);
     const csv = [header, ...rows]
       .map(row => row.map(cell => `"${String(cell ?? "").replaceAll('"', '""')}"`).join(","))
       .join("\n");
@@ -218,6 +356,9 @@ function serveStatic(req, res) {
 }
 
 ensureStore();
+initDatabase().catch(error => {
+  console.error("Database initialization failed:", error);
+});
 
 http.createServer((req, res) => {
   if (req.url.startsWith("/api/")) {
