@@ -30,6 +30,10 @@ function setMessage(text, isError = false) {
   els.message.classList.toggle("error", isError);
 }
 
+function showPopup(text) {
+  window.alert(text);
+}
+
 function setBusy(isBusy) {
   els.checkIn.disabled = isBusy || !loadProfile();
   els.checkOut.disabled = isBusy || !loadProfile();
@@ -120,7 +124,15 @@ async function punch(type) {
     });
     const result = await response.json();
     if (!result.ok) throw new Error(result.error || "提交失败");
-    setMessage(`${type}成功，后台已保存记录。`);
+    if (result.duplicate) {
+      const duplicateMessage = result.message || `您已${type}`;
+      setMessage(duplicateMessage, true);
+      showPopup(duplicateMessage);
+      return;
+    }
+    const successMessage = result.message || `${type}成功`;
+    setMessage(`${successMessage}，后台已保存记录。`);
+    showPopup(successMessage);
   } catch (error) {
     const message = error.code === 1
       ? "定位权限被拒绝，请在浏览器设置中允许访问位置。"
