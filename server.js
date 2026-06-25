@@ -140,30 +140,91 @@ async function listRecords() {
   }));
 }
 
+function getShanghaiDay(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 async function addRecord(record) {
   requireDatabase();
 
   await initDatabase();
-  await pool.query(
-    `INSERT INTO attendance_records (
-      id, type, name, college, person_id, time, day,
-      latitude, longitude, accuracy, ip, user_agent
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [
-      record.id,
-      record.type,
-      record.name,
-      record.college,
-      record.personId,
-      record.time,
-      record.day,
-      record.latitude,
-      record.longitude,
-      record.accuracy,
-      record.ip,
-      record.userAgent
-    ]
-  );
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+      [`${record.day}:${record.personId}:${record.type}`]
+    );
+
+    const existing = await client.query(
+      `SELECT
+        id,
+        type,
+        name,
+        college,
+        person_id AS "personId",
+        time,
+        day,
+        latitude,
+        longitude,
+        accuracy,
+        ip,
+        user_agent AS "userAgent"
+      FROM attendance_records
+      WHERE day = $1 AND person_id = $2 AND type = $3
+      ORDER BY time ASC
+      LIMIT 1`,
+      [record.day, record.personId, record.type]
+    );
+
+    if (existing.rows.length) {
+      await client.query("COMMIT");
+      const existingRecord = existing.rows[0];
+      return {
+        duplicate: true,
+        record: {
+          ...existingRecord,
+          time: new Date(existingRecord.time).toISOString()
+        }
+      };
+    }
+
+    await client.query(
+      `INSERT INTO attendance_records (
+        id, type, name, college, person_id, time, day,
+        latitude, longitude, accuracy, ip, user_agent
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        record.id,
+        record.type,
+        record.name,
+        record.college,
+        record.personId,
+        record.time,
+        record.day,
+        record.latitude,
+        record.longitude,
+        record.accuracy,
+        record.ip,
+        record.userAgent
+      ]
+    );
+    await client.query("COMMIT");
+    return { duplicate: false, record };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function sendJson(res, status, data) {
@@ -230,7 +291,7 @@ function validatePunch(payload) {
     college,
     personId,
     time: new Date().toISOString(),
-    day: new Date().toISOString().slice(0, 10),
+    day: getShanghaiDay(),
     latitude,
     longitude,
     accuracy: Number.isFinite(accuracy) ? Math.round(accuracy) : 0
@@ -270,8 +331,13 @@ async function handleApi(req, res) {
         userAgent: req.headers["user-agent"] || ""
       };
 
-      await addRecord(record);
-      sendJson(res, 200, { ok: true, record });
+      const result = await addRecord(record);
+      sendJson(res, 200, {
+        ok: true,
+        duplicate: result.duplicate,
+        message: result.duplicate ? `您已${record.type}` : `${record.type}成功`,
+        record: result.record
+      });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error.message || "保存失败" });
     }
